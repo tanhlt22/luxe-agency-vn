@@ -70,9 +70,9 @@ interface PublicReleaseResponse {
 export class SoftwarePage implements OnInit {
   private readonly http = inject(HttpClient);
 
-  readonly currentVersion = signal('v1.0.60');
-  readonly releaseDate = signal('06/11/2026');
-  readonly fileSize = signal('846.2 MB');
+  readonly currentVersion = signal('v1.0.69');
+  readonly releaseDate = signal('12/11/2026');
+  readonly fileSize = signal('1267.7 MB');
   readonly platform = 'Windows 10 / 11 (64-bit)';
   readonly installerAvailable = signal(true);
   readonly downloadUrl = 'https://tanhbooth-api.laihoanganh456.workers.dev/download/latest';
@@ -317,10 +317,24 @@ export class SoftwarePage implements OnInit {
 
   releaseUpdates: ReleaseUpdate[] = [
     {
-      version: 'v1.0.60',
-      releaseDate: '06/11/2026',
+      version: 'v1.0.69',
+      releaseDate: '12/11/2026',
       isLatest: true,
       tagText: 'Bản mới nhất',
+      summary: 'Nâng cấp công nghệ AI Face Beauty & Làm đẹp Tự nhiên thế hệ mới: Xử lý chính xác theo vùng khuôn mặt (Face ROI), bảo toàn độ sắc nét đường viền mắt - mũi - môi, tối ưu CIE-Lab skin roll-off và bổ sung bộ 3D LUT Studio/Instagram; đồng thời khóa kéo trượt màn hình cảm ứng, cải tiến điều phối máy ảnh Sony/Nikon/Fujifilm và quy trình thanh toán VietQR.',
+      downloadSize: '1267.7 MB',
+      changes: [
+        { category: 'improved', label: 'Bảo toàn viền mắt, mũi, môi & cấu trúc 3D khi làm đẹp AI/Tự nhiên', text: 'Tối ưu xử lý đúng vùng khuôn mặt (ROI), nâng ngưỡng bảo vệ chi tiết tần số cao và khôi phục viền mắt - mũi - môi giúp gương mặt sắc nét, có chiều sâu mà vẫn giữ độ mịn tự nhiên.' },
+        { category: 'new', label: 'Bổ sung cài đặt làm đẹp chuyên sâu & 3D LUT Studio', text: 'Thêm tinh chỉnh thon mũi, khử quầng thâm mắt, glass skin, tối ưu CIE-Lab highlight roll-off và mở rộng bộ lọc màu 3D LUT chân dung Instagram / Studio.' },
+        { category: 'improved', label: 'Khóa kéo trượt màn hình cảm ứng & Giao diện Kiosk', text: 'Chống rung lắc màn hình cảm ứng khi thao tác nhanh trên Booth, ổn định nút bấm thanh công cụ làm đẹp trong ScrollViewer.' },
+        { category: 'improved', label: 'Tối ưu Driver Máy Ảnh Nikon / Sony / Fujifilm & VietQR', text: 'Cập nhật native camera host SDK mới nhất cho Nikon & Sony, nâng cấp quy trình thanh toán VietQR và đồng bộ bộ cài đặt Windows v1.0.69 + Cloudflare OTA.' }
+      ]
+    },
+    {
+      version: 'v1.0.60',
+      releaseDate: '06/11/2026',
+      isLatest: false,
+      tagText: 'Bản trước',
       summary: 'Tối ưu hóa toàn diện luồng sự kiện: Mặc định bật màn hình Xem lại & Chỉnh sửa (Review & Edit) cho phép kiểm tra khung ảnh, chụp lại (Retake) và tinh chỉnh trước khi in; nâng cấp hệ thống thư viện QR Cloud sang domain mới https://pica.photobooth.event-vn.com; tối ưu hóa xuất video hậu trường BTS 30 FPS sắc nét và hệ thống tự động cập nhật OTA 1 chạm qua Cloudflare.',
       downloadSize: '846.2 MB',
       changes: [
@@ -573,9 +587,9 @@ export class SoftwarePage implements OnInit {
         }
       }
     } catch {
-      this.currentVersion.set('v1.0.60');
-      this.releaseDate.set('06/11/2026');
-      this.fileSize.set('846.2 MB');
+      this.currentVersion.set('v1.0.69');
+      this.releaseDate.set('12/11/2026');
+      this.fileSize.set('1267.7 MB');
       this.installerAvailable.set(true);
     }
   }
