@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, inject, OnInit, signal, WritableSignal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
@@ -55,10 +55,71 @@ interface TechLimitation {
   recommendation: string;
 }
 
+const DEFAULT_SOFTWARE_VERSION = 'v1.0.81';
+const DEFAULT_RELEASE_DATE = '20/11/2026';
+
+type EditionKey = 'event' | 'booth';
+
+interface EditionConfig {
+  key: EditionKey;
+  /** Product code understood by the release API (?product=). */
+  product: string;
+  label: string;
+  title: string;
+  description: string;
+  highlights: string[];
+  fallback: { size: string; url: string };
+}
+
+// Pica Photobox is shipped as two independent products. The fallback values are
+// used until (or unless) the release API answers for that product.
+const EDITION_CONFIGS: EditionConfig[] = [
+  {
+    key: 'event',
+    product: 'pica-event',
+    label: 'Sự kiện',
+    title: 'Pica Photobox Event',
+    description: 'Dành cho đơn vị chụp ảnh sự kiện, tiệc cưới, hội nghị: chạy kiosk theo từng sự kiện và khung ảnh, điều khiển từ xa bằng điện thoại, in ảnh tự động và chia sẻ QR.',
+    highlights: [
+      'Chế độ Sự kiện theo từng sự kiện, khung ảnh và màn hình tùy biến',
+      'Điều khiển từ xa bằng điện thoại, in ảnh tự động, QR Gallery',
+      'AI làm đẹp, bộ lọc 3D LUT, ảnh thẻ',
+    ],
+    fallback: {
+      size: '909.6 MB',
+      url: 'https://github.com/tanhlt22/pica-photobox-releases/releases/download/pica-event-v1.0.81/PicaPhotobox-Event-Setup-v1.0.81.exe',
+    },
+  },
+  {
+    key: 'booth',
+    product: 'pica-booth',
+    label: 'Quán',
+    title: 'Pica Photobox Booth',
+    description: 'Dành cho quán và studio chụp ảnh tự phục vụ: chế độ Phòng chụp, Self-Booth, thanh toán QR, voucher và vòng quay may mắn ngay tại quầy.',
+    highlights: [
+      'Chế độ Phòng chụp và Self-Booth (chụp theo gói thời gian)',
+      'Thanh toán QR / tiền mặt, voucher, vòng quay may mắn',
+      'AI làm đẹp, bộ lọc 3D LUT, ảnh thẻ',
+    ],
+    fallback: {
+      size: '909.6 MB',
+      url: 'https://github.com/tanhlt22/pica-photobox-releases/releases/download/pica-booth-v1.0.81/PicaPhotobox-Booth-Setup-v1.0.81.exe',
+    },
+  },
+];
+
+interface EditionDownload extends EditionConfig {
+  version: WritableSignal<string>;
+  releaseDate: WritableSignal<string>;
+  fileSize: WritableSignal<string>;
+  downloadUrl: WritableSignal<string>;
+}
+
 interface PublicReleaseResponse {
   ok: boolean;
+  product?: string;
   release: { version: string; notes: string | null; publishedAt: string } | null;
-  installer: { available: boolean; size: number | null; downloadUrl: string };
+  installer: { available: boolean; size: number | null; downloadUrl: string; directUrl?: string };
 }
 
 @Component({
@@ -70,12 +131,17 @@ interface PublicReleaseResponse {
 export class SoftwarePage implements OnInit {
   private readonly http = inject(HttpClient);
 
-  readonly currentVersion = signal('v1.0.69');
-  readonly releaseDate = signal('12/11/2026');
-  readonly fileSize = signal('1267.7 MB');
+  readonly currentVersion = signal(DEFAULT_SOFTWARE_VERSION);
+  readonly releaseDate = signal(DEFAULT_RELEASE_DATE);
   readonly platform = 'Windows 10 / 11 (64-bit)';
   readonly installerAvailable = signal(true);
-  readonly downloadUrl = 'https://tanhbooth-api.laihoanganh456.workers.dev/download/latest';
+  readonly editions: EditionDownload[] = EDITION_CONFIGS.map((config) => ({
+    ...config,
+    version: signal(DEFAULT_SOFTWARE_VERSION),
+    releaseDate: signal(DEFAULT_RELEASE_DATE),
+    fileSize: signal(config.fallback.size),
+    downloadUrl: signal(config.fallback.url),
+  }));
   readonly googleDriveUrl = 'https://drive.google.com/drive/folders/12kUOKaVUdW9Bg3cdioG2PLshN5UhDHkD?usp=sharing';
   readonly googleDriveZipUrl = 'https://drive.google.com/drive/folders/12kUOKaVUdW9Bg3cdioG2PLshN5UhDHkD?usp=sharing';
   readonly googleDriveFolderUrl = 'https://drive.google.com/drive/folders/12kUOKaVUdW9Bg3cdioG2PLshN5UhDHkD?usp=sharing';
@@ -317,10 +383,38 @@ export class SoftwarePage implements OnInit {
 
   releaseUpdates: ReleaseUpdate[] = [
     {
-      version: 'v1.0.69',
-      releaseDate: '12/11/2026',
+      version: 'v1.0.81',
+      releaseDate: '20/11/2026',
       isLatest: true,
       tagText: 'Bản mới nhất',
+      summary: 'Pica Photobox tách thành hai phiên bản độc lập: Event cho đơn vị chụp ảnh sự kiện và Booth cho quán/studio tự phục vụ. Mỗi bản có bộ cài, bản quyền và kênh cập nhật riêng, cài song song được trên cùng một máy. Ứng dụng luôn chạy với quyền quản trị để kích hoạt và cài driver ổn định.',
+      downloadSize: 'Event 909.6 MB • Booth 909.6 MB',
+      changes: [
+        { category: 'new', label: 'Hai phiên bản Event và Booth', text: 'Event (chế độ Sự kiện) và Booth (Phòng chụp, Self-Booth, thanh toán, voucher, vòng quay) được phát hành thành hai bộ cài riêng, không còn gộp chung.' },
+        { category: 'new', label: 'Cập nhật và bản quyền riêng từng bản', text: 'Mỗi phiên bản nhận bản cập nhật độc lập. Mã bản quyền cũ vẫn dùng được cho cả hai bản; mã cấp mới chỉ dùng cho đúng phiên bản.' },
+        { category: 'fixed', label: 'Tự chạy bằng quyền Administrator', text: 'Ứng dụng yêu cầu quyền quản trị ngay khi mở (kể cả khi tự khởi động sau cài đặt hoặc sau khi cập nhật) nên không còn lỗi không kích hoạt được.' },
+        { category: 'improved', label: 'Đồng bộ thương hiệu Pica Photobox', text: 'Tên ứng dụng, thư mục cài đặt, shortcut, dữ liệu và thông báo đều dùng thương hiệu Pica Photobox.' }
+      ]
+    },
+    {
+      version: 'v1.0.80',
+      releaseDate: '20/11/2026',
+      isLatest: false,
+      tagText: 'Bản trước',
+      summary: 'Đồng bộ luồng in Sự kiện theo Thiết lập in (printPolicy), nâng cấp pipeline làm đẹp AI Alibaba + PFLD 106-lite mượt mà, tối ưu tốc độ render/xuất ảnh in và tích hợp Self-Booth cùng hệ thống OTA Cloudflare R2/D1.',
+      downloadSize: '955.5 MB',
+      changes: [
+        { category: 'improved', label: 'Đồng bộ luồng in Sự kiện theo Thiết lập in', text: 'Loại bỏ tùy chọn tự động in trùng lặp tại màn Nhận ảnh & In; đồng bộ bật/tắt in, tự động in, nút in và giới hạn số bản in nhất quán theo printPolicy trong Thiết lập in.' },
+        { category: 'improved', label: 'Pipeline Làm đẹp AI Alibaba + PFLD 106-lite & Xử lý ảnh in', text: 'Nâng cao độ chính xác nhận diện mốc khuôn mặt, bảo toàn chi tiết khi retouch, tăng tốc render xem trước và xuất file in chuẩn 300 DPI.' },
+        { category: 'new', label: 'Tích hợp Self-Booth, Web Remote & Hàng đợi in đám mây', text: 'Hỗ trợ quét mã vé, điều khiển chụp từ xa, thanh toán VietQR và đồng bộ trạng thái Kiosk ổn định.' },
+        { category: 'improved', label: 'Cập nhật bộ cài đặt Windows v1.0.80 & Cloudflare OTA', text: 'Phát hành bộ cài PicaPhotobox-Setup-v1.0.80.exe (955.5 MB) đồng bộ trực tiếp qua GitHub Releases và Cloudflare R2/D1.' }
+      ]
+    },
+    {
+      version: 'v1.0.69',
+      releaseDate: '12/11/2026',
+      isLatest: false,
+      tagText: 'Bản trước',
       summary: 'Nâng cấp công nghệ AI Face Beauty & Làm đẹp Tự nhiên thế hệ mới: Xử lý chính xác theo vùng khuôn mặt (Face ROI), bảo toàn độ sắc nét đường viền mắt - mũi - môi, tối ưu CIE-Lab skin roll-off và bổ sung bộ 3D LUT Studio/Instagram; đồng thời khóa kéo trượt màn hình cảm ứng, cải tiến điều phối máy ảnh Sony/Nikon/Fujifilm và quy trình thanh toán VietQR.',
       downloadSize: '1267.7 MB',
       changes: [
@@ -562,36 +656,48 @@ export class SoftwarePage implements OnInit {
   }
 
   async loadPublishedRelease(): Promise<void> {
+    await Promise.all(this.editions.map((edition) => this.loadEditionRelease(edition)));
+    const versions = this.editions.map((edition) => edition.version());
+    this.currentVersion.set(versions.sort(this.compareVersionLabels).pop() ?? DEFAULT_SOFTWARE_VERSION);
+    this.installerAvailable.set(true);
+  }
+
+  private async loadEditionRelease(edition: EditionDownload): Promise<void> {
     try {
       const response = await firstValueFrom(this.http.get<PublicReleaseResponse>(
-        `${environment.softwareReleaseApiUrl}/download/latest/metadata`
+        `${environment.softwareReleaseApiUrl}/download/latest/metadata`,
+        { params: { product: edition.product } },
       ));
-      if (!response.ok || !response.release) throw new Error('No published release');
+      // A Worker that does not know editions yet ignores ?product= and answers with the
+      // legacy combined installer. Only trust an answer that names this edition's product.
+      if (!response.ok || response.product !== edition.product || !response.release || !response.installer?.available) {
+        throw new Error('No published release for ' + edition.product);
+      }
 
       const rawVer = response.release.version;
-      const formattedVer = rawVer.startsWith('v') ? rawVer : `v${rawVer}`;
-      this.currentVersion.set(formattedVer);
-      this.releaseDate.set(this.formatDate(response.release.publishedAt));
-      if (response.installer?.size != null) {
-        this.fileSize.set(this.formatBytes(response.installer.size));
+      edition.version.set(rawVer.startsWith('v') ? rawVer : `v${rawVer}`);
+      edition.releaseDate.set(this.formatDate(response.release.publishedAt));
+      if (response.installer.size != null && response.installer.size > 0) {
+        edition.fileSize.set(this.formatBytes(response.installer.size));
       }
-      this.installerAvailable.set(true);
-
-      if (this.releaseUpdates.length > 0 && this.releaseUpdates[0].version === formattedVer) {
-        this.releaseUpdates[0].releaseDate = this.formatDate(response.release.publishedAt);
-        if (response.release.notes?.trim()) {
-          this.releaseUpdates[0].summary = response.release.notes.trim();
-        }
-        if (response.installer?.size != null) {
-          this.releaseUpdates[0].downloadSize = this.formatBytes(response.installer.size);
-        }
+      const resolvedDownloadUrl = response.installer.directUrl || response.installer.downloadUrl;
+      if (resolvedDownloadUrl) {
+        edition.downloadUrl.set(resolvedDownloadUrl);
       }
     } catch {
-      this.currentVersion.set('v1.0.69');
-      this.releaseDate.set('12/11/2026');
-      this.fileSize.set('1267.7 MB');
-      this.installerAvailable.set(true);
+      // Keep the built-in fallback (direct GitHub release link) for this edition.
     }
+  }
+
+  private compareVersionLabels(a: string, b: string): number {
+    const parse = (value: string) => value.replace(/^v/i, '').split('.').map((part) => parseInt(part, 10) || 0);
+    const left = parse(a);
+    const right = parse(b);
+    for (let i = 0; i < Math.max(left.length, right.length); i++) {
+      const diff = (left[i] ?? 0) - (right[i] ?? 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
   }
 
   triggerDownload(): void {
