@@ -142,8 +142,20 @@ export class GoogleDriveGalleryService {
     return photo?.mediaUrl || '';
   }
 
-  getHighResUrl(photo: GalleryPhoto, _size: number = 1440): string {
-    return photo?.mediaUrl || '';
+  getHighResUrl(photo: GalleryPhoto, size: number = 1600): string {
+    const rawUrl = photo?.mediaUrl || '';
+    if (!rawUrl || this.isVideo(photo)) return rawUrl;
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.pathname.includes('/media/')) {
+        parsed.searchParams.set('variant', 'image');
+        parsed.searchParams.set('size', String(size));
+        return parsed.toString();
+      }
+    } catch {
+      // Relative/demo URL
+    }
+    return rawUrl;
   }
 
   getLightboxUrl(photo: GalleryPhoto): string {

@@ -1,0 +1,535 @@
+<div class="min-h-screen bg-[#F8F9FA] pt-20 pb-16 px-4 md:px-8">
+
+  <!-- ================= MÀN HÌNH ĐĂNG NHẬP NHÂN VIÊN QUẦY ================= -->
+  <div *ngIf="!isAuthenticated()" class="max-w-md mx-auto pt-16">
+    <div class="bg-white rounded-[28px] p-8 soft-shadow border border-gray-200 text-center">
+      <div class="w-16 h-16 rounded-2xl bg-[#B76E79]/10 text-[#814C53] flex items-center justify-center mx-auto mb-4 text-3xl">
+        🔐
+      </div>
+      <h2 class="text-2xl font-serif font-bold text-[#814C53] mb-1">Quản Trị Quầy Thu Ngân</h2>
+      <p class="text-xs text-gray-500 mb-6">Dành riêng cho nhân viên điều phối phiên chụp Self-Booth</p>
+
+      <div *ngIf="loginError()" class="p-3 mb-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
+        {{ loginError() }}
+      </div>
+
+      <div class="mb-5 text-left">
+        <label class="block text-xs font-semibold text-gray-600 mb-2 uppercase">Mã PIN Nhân Viên / Mật Khẩu</label>
+        <input
+          type="password"
+          [ngModel]="pinInput()"
+          (ngModelChange)="pinInput.set($event)"
+          (keyup.enter)="handleLogin()"
+          placeholder="Nhập mã PIN quầy..."
+          class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#B76E79] text-center font-mono tracking-widest text-lg"
+        />
+        <span class="text-[11px] text-gray-400 block mt-1 text-center">Gợi ý: Mặc định 888888</span>
+      </div>
+
+      <button
+        (click)="handleLogin()"
+        class="w-full py-3.5 rounded-full bg-gradient-to-r from-[#B76E79] to-[#814C53] text-white font-semibold text-sm soft-shadow hover:opacity-95 transition-all cursor-pointer"
+      >
+        Đăng Nhập Quầy
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= BẢNG ĐIỀU KHIỂN QUẢN TRỊ 3 TAB ================= -->
+  <div *ngIf="isAuthenticated()" class="max-w-7xl mx-auto">
+
+    <!-- Top Navigation Header -->
+    <div class="bg-white rounded-[24px] p-4 md:p-6 soft-shadow border border-gray-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-[#B76E79]/10 text-[#814C53] flex items-center justify-center text-xl font-bold">
+          🏢
+        </div>
+        <div>
+          <h1 class="text-lg md:text-xl font-serif font-bold text-[#814C53]">Quầy Thu Ngân &amp; Điều Phối In</h1>
+          <div class="text-xs text-gray-500">Chi nhánh: <strong>Hải Phòng (store_hp_01)</strong> • Phiên: Counter Staff</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+        <div class="text-xs text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full font-semibold border border-emerald-200">
+          ● Hệ Thống Trực Tuyến
+        </div>
+        <button
+          (click)="handleLogout()"
+          class="px-4 py-1.5 rounded-full border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+        >
+          Đăng Xuất
+        </button>
+      </div>
+    </div>
+
+    <!-- 3 Tab Buttons Navigation -->
+    <div class="flex border-b border-gray-200 mb-6 gap-2 overflow-x-auto">
+      <button
+        type="button"
+        (click)="switchTab('TICKETS_QUEUE')"
+        class="px-5 py-3 text-sm font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap"
+        [ngClass]="currentTab() === 'TICKETS_QUEUE' ? 'border-[#B76E79] text-[#814C53] bg-white rounded-t-xl' : 'border-transparent text-gray-500 hover:text-gray-800'"
+      >
+        🎟️ Tab 1: Phát Mã &amp; Hàng Đợi Phiên
+      </button>
+
+      <button
+        type="button"
+        (click)="switchTab('PRINT_QUEUE')"
+        class="px-5 py-3 text-sm font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap relative"
+        [ngClass]="currentTab() === 'PRINT_QUEUE' ? 'border-[#B76E79] text-[#814C53] bg-white rounded-t-xl' : 'border-transparent text-gray-500 hover:text-gray-800'"
+      >
+        🖨️ Tab 2: Hàng Đợi In Tập Trung
+        <span *ngIf="isAutoPrintEnabled()" class="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+          Auto: BẬT
+        </span>
+      </button>
+
+      <button
+        type="button"
+        (click)="switchTab('WAREHOUSE_SETTINGS')"
+        class="px-5 py-3 text-sm font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap"
+        [ngClass]="currentTab() === 'WAREHOUSE_SETTINGS' ? 'border-[#B76E79] text-[#814C53] bg-white rounded-t-xl' : 'border-transparent text-gray-500 hover:text-gray-800'"
+      >
+        ⚙️ Tab 3: Kho Khung / Bộ Lọc / Gói / SePay
+      </button>
+    </div>
+
+    <!-- ================= TAB 1: PHÁT MÃ & HÀNG ĐỢI PHIÊN CHỤP ================= -->
+    <div *ngIf="currentTab() === 'TICKETS_QUEUE'" class="space-y-6">
+
+      <!-- Form Phát Mã Nhanh -->
+      <div class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100">
+        <h2 class="text-base font-bold font-serif text-[#814C53] mb-4 flex items-center gap-2">
+          <span>⚡</span> Phát Mã Vé Nhanh Tại Quầy
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Gói Chụp</label>
+            <select
+              [ngModel]="newTicketPackageId()"
+              (ngModelChange)="newTicketPackageId.set($event)"
+              class="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#B76E79]"
+            >
+              <option value="pkg_15">Gói 15 Phút (2 ảnh) — 99.000đ</option>
+              <option value="pkg_30">Gói 30 Phút (4 ảnh) — 179.000đ</option>
+              <option value="pkg_45">Gói 45 Phút (6 ảnh) — 249.000đ</option>
+              <option value="pkg_60">Gói 60 Phút (8 ảnh) — 319.000đ</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Tên Khách Hàng</label>
+            <input
+              type="text"
+              [ngModel]="newTicketCustomerName()"
+              (ngModelChange)="newTicketCustomerName.set($event)"
+              placeholder="Tên khách..."
+              class="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#B76E79]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Số Điện Thoại</label>
+            <input
+              type="tel"
+              [ngModel]="newTicketCustomerPhone()"
+              (ngModelChange)="newTicketCustomerPhone.set($event)"
+              placeholder="09..."
+              class="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#B76E79]"
+            />
+          </div>
+
+          <div>
+            <button
+              (click)="handleIssueTicket()"
+              class="w-full py-2.5 rounded-xl bg-[#B76E79] hover:bg-[#814C53] text-white font-semibold text-sm transition-all cursor-pointer"
+            >
+              + Tạo Vé &amp; Thu Tiền
+            </button>
+          </div>
+        </div>
+
+        <!-- Banner vé vừa phát -->
+        <div *ngIf="issuedTicketCode()" class="mt-4 p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">🎉</span>
+            <div>
+              <span class="text-xs text-emerald-700">Vừa phát vé thành công! Mã 6 số:</span>
+              <strong class="font-mono text-xl text-emerald-800 ml-2">{{ issuedTicketCode() }}</strong>
+            </div>
+          </div>
+          <button (click)="issuedTicketCode.set(null)" class="text-emerald-700 text-xs hover:underline">Đóng</button>
+        </div>
+      </div>
+
+      <!-- Bảng Hàng Đợi Phiên Chụp -->
+      <div class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100">
+        <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
+          <h2 class="text-base font-bold font-serif text-[#814C53] flex items-center gap-2">
+            <span>📋</span> Danh Sách Phiên Chụp Trong Ngày
+          </h2>
+
+          <div class="flex items-center gap-2 w-full md:w-auto">
+            <input
+              type="text"
+              [ngModel]="ticketSearch()"
+              (ngModelChange)="ticketSearch.set($event); loadTickets(false)"
+              placeholder="Tìm theo mã vé, tên, SĐT..."
+              class="px-3 py-1.5 rounded-xl border border-gray-200 text-xs w-full md:w-56"
+            />
+            <select
+              [ngModel]="ticketStatusFilter()"
+              (ngModelChange)="ticketStatusFilter.set($event); loadTickets(false)"
+              class="px-3 py-1.5 rounded-xl border border-gray-200 text-xs"
+            >
+              <option value="">Tất cả trạng thái</option>
+              <option value="WAITING">Đang chờ (WAITING)</option>
+              <option value="ACTIVE">Đang chụp (ACTIVE)</option>
+              <option value="COMPLETED">Đã chụp xong (COMPLETED)</option>
+              <option value="PENDING_PAYMENT">Chờ thanh toán</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase">
+              <tr>
+                <th class="py-3 px-3">Mã Vé</th>
+                <th class="py-3 px-3">Khách Hàng</th>
+                <th class="py-3 px-3">Gói</th>
+                <th class="py-3 px-3">Hạn Mức In</th>
+                <th class="py-3 px-3">Trạng Thái</th>
+                <th class="py-3 px-3">Thời Gian</th>
+                <th class="py-3 px-3 text-right">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr *ngFor="let t of tickets()" class="hover:bg-gray-50/60 transition-colors">
+                <td class="py-3 px-3 font-mono font-bold text-sm text-[#814C53]">{{ t.ticket_code }}</td>
+                <td class="py-3 px-3">
+                  <div class="font-semibold text-gray-800">{{ t.customer_name || 'Khách lẻ' }}</div>
+                  <div class="text-[11px] text-gray-400">{{ t.customer_phone || '---' }}</div>
+                </td>
+                <td class="py-3 px-3">
+                  <div>{{ t.package_name }}</div>
+                  <div class="text-[11px] text-gray-400">{{ t.duration_minutes }} phút • {{ formatVnd(t.amount) }}</div>
+                </td>
+                <td class="py-3 px-3">
+                  <span class="font-bold text-[#814C53]">{{ t.prints_used }}</span> / {{ t.print_quota }}
+                </td>
+                <td class="py-3 px-3">
+                  <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                    [ngClass]="{
+                      'bg-amber-100 text-amber-800': t.status === 'WAITING',
+                      'bg-blue-100 text-blue-800': t.status === 'ACTIVE',
+                      'bg-purple-100 text-purple-800': t.status === 'COMPLETED',
+                      'bg-gray-100 text-gray-700': t.status === 'PENDING_PAYMENT',
+                      'bg-red-100 text-red-700': t.status === 'CANCELLED'
+                    }"
+                  >
+                    {{ t.status }}
+                  </span>
+                </td>
+                <td class="py-3 px-3 text-gray-400 text-[11px]">
+                  {{ t.created_at | date:'HH:mm dd/MM' }}
+                </td>
+                <td class="py-3 px-3 text-right space-x-1">
+                  <!-- Xác nhận tiền mặt -->
+                  <button
+                    *ngIf="t.payment_status === 'PENDING'"
+                    (click)="confirmPayment(t)"
+                    class="px-2 py-1 bg-green-50 text-green-700 rounded-md font-semibold text-[11px] hover:bg-green-100 cursor-pointer"
+                  >
+                    Thu Tiền
+                  </button>
+
+                  <!-- In hóa đơn trình duyệt -->
+                  <button
+                    (click)="printBrowserTicket(t)"
+                    class="px-2 py-1 bg-gray-100 text-gray-700 rounded-md text-[11px] hover:bg-gray-200 cursor-pointer"
+                  >
+                    In Vé
+                  </button>
+
+                  <!-- Ghép khung -->
+                  <a
+                    [routerLink]="['/selfbooth/compose']"
+                    [queryParams]="{ ticket: t.ticket_code, session: t.session_code }"
+                    class="px-2 py-1 bg-[#B76E79]/10 text-[#814C53] rounded-md font-semibold text-[11px] hover:bg-[#B76E79]/20 inline-block"
+                  >
+                    Ghép Khung
+                  </a>
+
+                  <!-- Hủy vé -->
+                  <button
+                    *ngIf="t.status !== 'COMPLETED' && t.status !== 'CANCELLED'"
+                    (click)="cancelTicket(t)"
+                    class="px-2 py-1 text-red-500 hover:text-red-700 text-[11px] cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div *ngIf="tickets().length === 0" class="text-center py-10 text-gray-400 text-xs">
+            Chưa có vé nào phù hợp với bộ lọc.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ================= TAB 2: HÀNG ĐỢI IN TẬP TRUNG ================= -->
+    <div *ngIf="currentTab() === 'PRINT_QUEUE'" class="space-y-6">
+
+      <div class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-base font-bold font-serif text-[#814C53] mb-1">Hàng Đợi Máy In Tập Trung (Central Spooler)</h2>
+          <p class="text-xs text-gray-500">Các lệnh in từ khách ghép khung Web hoặc Kiosk đẩy lên R2</p>
+        </div>
+
+        <!-- Toggle Auto-Print -->
+        <div class="flex items-center gap-3 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200">
+          <span class="text-xs font-semibold text-gray-700">Tự Động In (Auto-Print):</span>
+          <button
+            type="button"
+            (click)="toggleAutoPrint()"
+            class="px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer"
+            [ngClass]="isAutoPrintEnabled() ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'"
+          >
+            {{ isAutoPrintEnabled() ? 'ĐANG BẬT' : 'TẮT' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Danh sách lệnh in -->
+      <div class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase">
+              <tr>
+                <th class="py-3 px-3">Mã Lệnh</th>
+                <th class="py-3 px-3">Mã Vé</th>
+                <th class="py-3 px-3">Preview</th>
+                <th class="py-3 px-3">Số Bản</th>
+                <th class="py-3 px-3">Nguồn</th>
+                <th class="py-3 px-3">Trạng Thái</th>
+                <th class="py-3 px-3">Thời Gian</th>
+                <th class="py-3 px-3 text-right">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr *ngFor="let o of printOrders()" class="hover:bg-gray-50/60 transition-colors">
+                <td class="py-3 px-3 font-mono font-semibold">{{ o.id | slice:0:8 }}...</td>
+                <td class="py-3 px-3 font-mono font-bold text-[#814C53]">{{ o.ticket_code }}</td>
+                <td class="py-3 px-3">
+                  <a [href]="o.file_url" target="_blank">
+                    <img [src]="o.file_url" alt="Preview" class="w-12 h-16 object-cover rounded border border-gray-200 hover:scale-150 transition-transform bg-white" />
+                  </a>
+                </td>
+                <td class="py-3 px-3 font-bold">{{ o.copies }} bản</td>
+                <td class="py-3 px-3 text-gray-500">{{ o.source }}</td>
+                <td class="py-3 px-3">
+                  <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                    [ngClass]="{
+                      'bg-amber-100 text-amber-800': o.status === 'QUEUED',
+                      'bg-blue-100 text-blue-800': o.status === 'CLAIMED' || o.status === 'PRINTING',
+                      'bg-green-100 text-green-800': o.status === 'COMPLETED',
+                      'bg-red-100 text-red-800': o.status === 'FAILED'
+                    }"
+                  >
+                    {{ o.status }}
+                  </span>
+                </td>
+                <td class="py-3 px-3 text-gray-400 text-[11px]">{{ o.created_at | date:'HH:mm dd/MM' }}</td>
+                <td class="py-3 px-3 text-right space-x-2">
+                  <button
+                    (click)="triggerBrowserPrint(o)"
+                    class="px-2.5 py-1 bg-[#B76E79] text-white rounded-md text-[11px] font-semibold hover:bg-[#814C53] cursor-pointer"
+                  >
+                    In Ngay
+                  </button>
+                  <button
+                    *ngIf="o.status === 'FAILED' || o.status === 'CLAIMED'"
+                    (click)="retryOrder(o)"
+                    class="px-2 py-1 bg-gray-100 text-gray-700 rounded-md text-[11px] hover:bg-gray-200 cursor-pointer"
+                  >
+                    Thử Lại
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div *ngIf="printOrders().length === 0" class="text-center py-10 text-gray-400 text-xs">
+            Hàng đợi in hiện đang trống.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ================= TAB 3: KHO KHUNG / BỘ LỌC / GÓI / SEPAY ================= -->
+    <div *ngIf="currentTab() === 'WAREHOUSE_SETTINGS'" class="space-y-6">
+
+      <!-- Sub-tabs navigation -->
+      <div class="flex gap-2 border-b border-gray-200 pb-2">
+        <button
+          (click)="currentWarehouseSubTab.set('FRAMES')"
+          class="px-4 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
+          [ngClass]="currentWarehouseSubTab() === 'FRAMES' ? 'bg-[#B76E79] text-white' : 'bg-gray-100 text-gray-700'"
+        >
+          Kho Khung Ảnh ({{ frames().length }})
+        </button>
+        <button
+          (click)="currentWarehouseSubTab.set('FILTERS')"
+          class="px-4 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
+          [ngClass]="currentWarehouseSubTab() === 'FILTERS' ? 'bg-[#B76E79] text-white' : 'bg-gray-100 text-gray-700'"
+        >
+          Bộ Lọc Màu ({{ filters().length }})
+        </button>
+        <button
+          (click)="currentWarehouseSubTab.set('PACKAGES')"
+          class="px-4 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
+          [ngClass]="currentWarehouseSubTab() === 'PACKAGES' ? 'bg-[#B76E79] text-white' : 'bg-gray-100 text-gray-700'"
+        >
+          Gói Chụp ({{ packages().length }})
+        </button>
+        <button
+          (click)="currentWarehouseSubTab.set('SEPAY')"
+          class="px-4 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
+          [ngClass]="currentWarehouseSubTab() === 'SEPAY' ? 'bg-[#B76E79] text-white' : 'bg-gray-100 text-gray-700'"
+        >
+          Cấu Hình SePay
+        </button>
+      </div>
+
+      <!-- Sub-tab 1: Kho Khung -->
+      <div *ngIf="currentWarehouseSubTab() === 'FRAMES'" class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div *ngFor="let f of frames()" class="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col justify-between">
+            <div>
+              <div class="font-bold text-sm text-[#814C53] mb-1">{{ f.name }}</div>
+              <div class="text-xs text-gray-500 mb-2">Tỷ lệ: {{ f.aspect_ratio }} • {{ f.slot_count }} ô ảnh</div>
+              <div class="text-[11px] text-gray-400 font-mono mb-3">{{ f.width }}x{{ f.height }}px</div>
+            </div>
+            <div class="flex items-center justify-between pt-3 border-t border-gray-200">
+              <button
+                (click)="toggleFrameActive(f)"
+                class="px-2.5 py-1 rounded text-xs font-semibold cursor-pointer"
+                [ngClass]="f.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'"
+              >
+                {{ f.is_active ? 'Đang bật' : 'Tạm tắt' }}
+              </button>
+              <button (click)="deleteFrame(f)" class="text-xs text-red-500 hover:underline cursor-pointer">Xóa</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab 2: Bộ Lọc Màu -->
+      <div *ngIf="currentWarehouseSubTab() === 'FILTERS'" class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div *ngFor="let flt of filters()" class="p-4 rounded-xl border border-gray-200 bg-gray-50">
+            <div class="font-bold text-sm text-[#814C53] mb-1">{{ flt.name }}</div>
+            <div class="text-xs font-mono text-gray-500 bg-white p-2 rounded border border-gray-100 truncate" [title]="flt.css_filter">
+              {{ flt.css_filter }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab 3: Gói Chụp -->
+      <div *ngIf="currentWarehouseSubTab() === 'PACKAGES'" class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div *ngFor="let p of packages()" class="p-4 rounded-xl border border-gray-200 bg-gray-50">
+            <div class="font-bold text-sm text-[#814C53] mb-1">{{ p.name }}</div>
+            <div class="text-xs text-gray-500 mb-2">{{ p.duration_minutes }} phút • {{ p.print_quota }} bản in</div>
+            <div class="text-base font-bold text-[#814C53]">{{ formatVnd(p.price) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab 4: Cấu Hình SePay & Ngân Hàng -->
+      <div *ngIf="currentWarehouseSubTab() === 'SEPAY'" class="bg-white rounded-[24px] p-6 soft-shadow border border-gray-100 max-w-xl">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-[#814C53] mb-4">
+          🏦 Thông Tin Tài Khoản Nhận Tiền VietQR SePay
+        </h3>
+
+        <div *ngIf="saveSettingsSuccess()" class="p-3 mb-4 rounded-xl bg-green-50 border border-green-200 text-green-700 text-xs">
+          ✓ Lưu cấu hình SePay thành công!
+        </div>
+
+        <div class="space-y-4 text-xs">
+          <div>
+            <label class="block font-semibold text-gray-600 mb-1">Tên Ngân Hàng</label>
+            <input
+              type="text"
+              [ngModel]="sepayBankName()"
+              (ngModelChange)="sepayBankName.set($event)"
+              placeholder="Ví dụ: MBBank"
+              class="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs"
+            />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-gray-600 mb-1">Số Tài Khoản</label>
+            <input
+              type="text"
+              [ngModel]="sepayAccountNumber()"
+              (ngModelChange)="sepayAccountNumber.set($event)"
+              placeholder="Ví dụ: 0333888999"
+              class="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono"
+            />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-gray-600 mb-1">Tên Chủ Tài Khoản</label>
+            <input
+              type="text"
+              [ngModel]="sepayAccountHolder()"
+              (ngModelChange)="sepayAccountHolder.set($event)"
+              placeholder="Ví dụ: NGUYEN VAN A"
+              class="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs"
+            />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-gray-600 mb-1">SePay API Key (Tùy chọn)</label>
+            <input
+              type="password"
+              [ngModel]="sepayApiKey()"
+              (ngModelChange)="sepayApiKey.set($event)"
+              class="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono"
+            />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-gray-600 mb-1">SePay Webhook Secret (Tùy chọn)</label>
+            <input
+              type="password"
+              [ngModel]="sepayWebhookSecret()"
+              (ngModelChange)="sepayWebhookSecret.set($event)"
+              class="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-mono"
+            />
+          </div>
+
+          <button
+            (click)="saveSepaySettings()"
+            class="px-6 py-2.5 rounded-full bg-[#B76E79] text-white font-semibold text-xs hover:bg-[#814C53] transition-colors cursor-pointer"
+          >
+            Lưu Cấu Hình
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</div>

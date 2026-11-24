@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const apiRoot = path.join(projectRoot, 'api');
 const port = Number(process.env.LOCAL_API_PORT || 3001);
-const maxBodyBytes = 1_000_000;
+const maxBodyBytes = 25_000_000;
 
 loadEnv(path.join(projectRoot, '.env'));
 
@@ -61,7 +61,12 @@ async function readBody(request) {
   }
 
   if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const raw = Buffer.concat(chunks).toString('utf8');
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
 }
 
 const server = http.createServer(async (request, response) => {

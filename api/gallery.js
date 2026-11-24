@@ -3,7 +3,7 @@ import { createMediaToken, createStableMediaId } from './_media-token.js';
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_API_KEY = process.env.GOOGLE_DRIVE_API_KEY;
-const MEDIA_PROXY_URL = process.env.PUBLIC_MEDIA_PROXY_URL || 'https://image-photobooth.laihoanganh456.workers.dev';
+const MEDIA_PROXY_URL = process.env.PUBLIC_MEDIA_PROXY_URL || 'https://media.event-vn.com';
 const GALLERY_RESOLVER_URL = process.env.GALLERY_RESOLVER_URL || 'https://tanhbooth-api.laihoanganh456.workers.dev';
 const GALLERY_RESOLVER_SECRET = process.env.GALLERY_RESOLVER_SECRET || 'theanh2002';
 const ALLOWED_ORIGINS = new Set([
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
     res.status(400).json({ error: 'Session and legacy manifest filters cannot be combined' });
     return;
   }
-  if (cursor && (!isCursor(cursor) || sessionPublicId || legacyQueryValue || !isEventPublicId(requestedId))) {
+  if (cursor && (!isCursor(cursor) || sessionPublicId || legacyQueryValue)) {
     res.status(400).json({ error: 'Gallery cursor is invalid' });
     return;
   }
@@ -150,11 +150,14 @@ async function resolveGallerySource(requestedId, legacyQueryValue, sessionPublic
   if (isEventPublicId(requestedId)) {
     const resolved = await resolveEventFolder(requestedId);
     if (resolved.status !== 'READY') return { status: 'PENDING' };
-    const page = await listMediaFiles(resolved.driveFolderId, sessionPublicId || null, true, cursor || null, true, true);
+    // Luồng xem phiên riêng (SESSION): tải trọn bộ ~5-6 file của phiên;
+    // Luồng xem toàn bộ sự kiện (EVENT): phân trang lazy-loading theo cursor để hiển thị ngay trang đầu.
+    const loadAllPages = Boolean(sessionPublicId);
+    const page = await listMediaFiles(resolved.driveFolderId, sessionPublicId || null, true, cursor || null, loadAllPages, true);
     return { status: 'READY', files: page.files, nextCursor: page.nextCursor };
   }
-  const page = await listMediaFiles(requestedId, null, false, null, true);
-  return { files: page.files, nextCursor: null };
+  const page = await listMediaFiles(requestedId, null, false, cursor || null, false);
+  return { files: page.files, nextCursor: page.nextCursor };
 }
 
 async function resolveEventFolder(eventPublicId) {
@@ -431,9 +434,9 @@ function toPublicMedia(item, roleMeta = null) {
     slotIndex: roleMeta?.slotIndex || null,
     sessionId: roleMeta?.sessionId || null,
     createdAt: item.createdTime || item.modifiedTime || new Date().toISOString(),
-    thumbnailUrl: kind === 'video' ? mediaBase : `${mediaBase}?variant=image&size=720`,
-    mediaUrl: kind === 'video' ? mediaBase : `${mediaBase}?variant=image&size=1080`,
-    lightboxUrl: kind === 'video' ? mediaBase : `${mediaBase}?variant=image&size=2560`,
+    thumbnailUrl: kind === 'video' ? mediaBase : `${mediaBase}?variant=image&size=800`,
+    mediaUrl: kind === 'video' ? mediaBase : `${mediaBase}?variant=image&size=2560`,
+    lightboxUrl: kind === 'video' ? mediaBase : `${mediaBase}?variant=original`,
     downloadUrl: `${mediaBase}/download`
   };
 }

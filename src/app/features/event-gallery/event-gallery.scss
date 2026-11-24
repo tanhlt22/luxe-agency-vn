@@ -1507,6 +1507,11 @@ $radius-sm: 10px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+
+  .grid-item {
+    content-visibility: auto;
+    contain-intrinsic-size: auto none auto 240px;
+  }
 }
 
 // ===== EVENT FEED (CHẾ ĐỘ CUỘN 1 CỘT - INSTAGRAM STYLE) =====
@@ -1527,6 +1532,8 @@ $radius-sm: 10px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(212, 163, 115, 0.25);
   cursor: pointer;
   transition: transform 0.25s ease, box-shadow 0.25s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 520px;
 
   &:hover {
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(212, 163, 115, 0.45);
@@ -1656,6 +1663,84 @@ $radius-sm: 10px;
         background: linear-gradient(135deg, rgba($gold, 0.4), rgba($gold-dark, 0.5));
       }
     }
+  }
+}
+
+// ===== LAZY LOAD SENTINEL & LOAD MORE BUTTON =====
+.lazy-sentinel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 20px 28px;
+  margin: 0 auto;
+  max-width: 480px;
+  min-height: 52px;
+}
+
+.lazy-loading-spinner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  border-radius: 30px;
+  background: rgba(20, 18, 19, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(212, 163, 115, 0.3);
+  color: #f5eedf;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+
+  .spinner-ring {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(212, 163, 115, 0.25);
+    border-top-color: $gold;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+}
+
+.load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 26px;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(212, 163, 115, 0.35);
+  color: #f5f0e6;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+
+  .load-more-icon {
+    width: 16px;
+    height: 16px;
+    stroke: $gold;
+    transition: transform 0.2s ease;
+  }
+
+  &:hover {
+    background: rgba(212, 163, 115, 0.14);
+    border-color: rgba(212, 163, 115, 0.65);
+    color: #ffffff;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(212, 163, 115, 0.2);
+
+    .load-more-icon {
+      transform: translateY(2px);
+    }
+  }
+
+  &:active {
+    transform: scale(0.97);
   }
 }
 

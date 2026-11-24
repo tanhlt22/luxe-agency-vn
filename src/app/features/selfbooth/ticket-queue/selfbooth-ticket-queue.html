@@ -1,0 +1,157 @@
+<div class="min-h-screen bg-[#FDFBF7] pt-24 pb-16 px-4 md:px-8">
+  <div class="max-w-2xl mx-auto">
+
+    <!-- Loading State -->
+    <div *ngIf="isLoading()" class="text-center py-20">
+      <div class="w-12 h-12 border-4 border-[#B76E79] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+      <p class="text-sm text-[#814C53] font-medium">Đang tải trạng thái hàng đợi...</p>
+    </div>
+
+    <!-- Error State -->
+    <div *ngIf="!isLoading() && errorMessage()" class="bg-white rounded-3xl p-8 text-center soft-shadow border border-red-100">
+      <div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+        !
+      </div>
+      <h2 class="text-xl font-serif font-bold text-red-800 mb-2">Không Tìm Thấy Vé</h2>
+      <p class="text-sm text-gray-600 mb-6">{{ errorMessage() }}</p>
+      <a routerLink="/selfbooth" class="inline-block px-6 py-2.5 rounded-full bg-[#B76E79] text-white text-xs font-semibold hover:bg-[#814C53] transition-colors">
+        Đặt Gói Chụp Mới
+      </a>
+    </div>
+
+    <!-- Main Content -->
+    <div *ngIf="!isLoading() && ticket()">
+
+      <!-- CHUÔNG BÁO ĐẾN LƯỢT / FLASH BANNER -->
+      <div *ngIf="queue().isYourTurn && ticket()?.status === 'WAITING'" class="mb-6 p-4 md:p-5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white soft-shadow flex items-center gap-4 animate-bounce">
+        <div class="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-2xl shrink-0">
+          🔔
+        </div>
+        <div>
+          <h3 class="font-bold text-base md:text-lg">ĐÃ ĐẾN LƯỢT CỦA BẠN!</h3>
+          <p class="text-xs text-white/90">Vui lòng vào phòng chụp được chỉ định và nhập mã 6 số trên màn hình Kiosk để bắt đầu.</p>
+        </div>
+      </div>
+
+      <!-- THẺ VÉ 6 SỐ NỔI BẬT -->
+      <div class="bg-white rounded-[28px] p-6 md:p-8 soft-shadow border border-[#B76E79]/20 text-center mb-6 relative overflow-hidden">
+        <div class="absolute -top-12 -right-12 w-32 h-32 rounded-full bg-[#B76E79]/10 pointer-events-none"></div>
+
+        <div class="inline-block px-4 py-1 rounded-full bg-[#B76E79]/10 text-[#814C53] text-xs font-bold tracking-widest uppercase mb-2">
+          🎟️ Vé Chụp Self-Booth
+        </div>
+
+        <div class="text-xs text-gray-400 uppercase tracking-widest mb-1">Mã Vé 6 Chữ Số</div>
+        <div class="flex items-center justify-center gap-3 mb-3">
+          <span class="text-5xl md:text-6xl font-mono font-bold tracking-widest text-[#814C53]">
+            {{ ticket()?.ticket_code }}
+          </span>
+          <button
+            (click)="copyTicketCode()"
+            title="Sao chép mã vé"
+            class="p-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors cursor-pointer"
+          >
+            📋
+          </button>
+        </div>
+
+        <div class="text-sm font-serif font-medium text-[#2D2D2D]/80 mb-4">
+          Gói: <strong class="text-[#814C53]">{{ ticket()?.package_name }}</strong> ({{ ticket()?.duration_minutes }} phút)
+        </div>
+
+        <!-- Trạng thái Badge -->
+        <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold"
+          [ngClass]="{
+            'bg-amber-100 text-amber-800': ticket()?.status === 'WAITING',
+            'bg-blue-100 text-blue-800': ticket()?.status === 'ACTIVE',
+            'bg-purple-100 text-purple-800': ticket()?.status === 'COMPLETED',
+            'bg-gray-100 text-gray-800': ticket()?.status === 'PENDING_PAYMENT'
+          }"
+        >
+          <span class="w-2 h-2 rounded-full animate-ping"
+            [ngClass]="{
+              'bg-amber-500': ticket()?.status === 'WAITING',
+              'bg-blue-500': ticket()?.status === 'ACTIVE',
+              'bg-purple-500': ticket()?.status === 'COMPLETED',
+              'bg-gray-500': ticket()?.status === 'PENDING_PAYMENT'
+            }"
+          ></span>
+          <span *ngIf="ticket()?.status === 'WAITING'">Đang Xếp Hàng Chờ Lượt</span>
+          <span *ngIf="ticket()?.status === 'ACTIVE'">Đang Chụp Trong Phòng</span>
+          <span *ngIf="ticket()?.status === 'COMPLETED'">Đã Hoàn Thành Phiên Chụp</span>
+          <span *ngIf="ticket()?.status === 'PENDING_PAYMENT'">Chờ Thanh Toán Tại Quầy</span>
+        </div>
+      </div>
+
+      <!-- BẢNG THEO DÕI HÀNG ĐỢI THỜI GIAN THỰC -->
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <!-- Vị trí phía trước -->
+        <div class="bg-white p-5 rounded-2xl soft-shadow border border-gray-100 text-center">
+          <span class="text-xs text-gray-400 uppercase tracking-wider block mb-1">Người Chờ Trước Bạn</span>
+          <span class="text-3xl font-bold font-serif" [ngClass]="queue().aheadCount === 0 ? 'text-emerald-600' : 'text-[#814C53]'">
+            {{ queue().aheadCount }}
+          </span>
+          <span class="text-xs text-gray-500 block mt-1">
+            {{ queue().aheadCount === 0 ? 'Đến lượt bạn ngay bây giờ!' : 'lượt chụp phía trước' }}
+          </span>
+        </div>
+
+        <!-- Thời gian chờ hoặc thời gian còn lại -->
+        <div class="bg-white p-5 rounded-2xl soft-shadow border border-gray-100 text-center">
+          <span class="text-xs text-gray-400 uppercase tracking-wider block mb-1">
+            {{ ticket()?.status === 'ACTIVE' ? 'Thời Gian Còn Lại' : 'Ước Tính Chờ' }}
+          </span>
+          <span class="text-3xl font-bold font-mono text-[#814C53]">
+            {{ ticket()?.status === 'ACTIVE' ? formatTime(queue().remainingSeconds) : (queue().estimatedWaitMinutes + ' phút') }}
+          </span>
+          <span class="text-xs text-gray-500 block mt-1">
+            {{ ticket()?.status === 'ACTIVE' ? 'Đang đếm ngược' : 'Dựa trên tiến độ các phòng' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- HẠN MỨC IN ẢNH -->
+      <div class="bg-white rounded-2xl p-5 soft-shadow border border-gray-100 mb-6 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-[#B76E79]/10 text-[#814C53] flex items-center justify-center text-xl">
+            🖨️
+          </div>
+          <div>
+            <div class="text-xs text-gray-400 uppercase">Hạn Mức In Ảnh Của Vé</div>
+            <div class="text-sm font-bold text-[#2D2D2D]">
+              Đã in: <span class="text-[#814C53]">{{ printQuota().used }}</span> / {{ printQuota().total }} bản
+            </div>
+          </div>
+        </div>
+
+        <div class="text-right">
+          <span class="text-xs text-gray-400 block">Còn lại</span>
+          <span class="text-base font-bold text-emerald-600">{{ printQuota().remaining }} bản in</span>
+        </div>
+      </div>
+
+      <!-- TÁC VỤ KHI PHIÊN ĐÃ HOÀN THÀNH HOẶC CÓ LƯỢT IN -->
+      <div class="space-y-3">
+        <!-- Nút Ghép Khung & In Ảnh -->
+        <a
+          [routerLink]="['/selfbooth/compose']"
+          [queryParams]="{ ticket: ticket()?.ticket_code, session: ticket()?.session_code }"
+          class="w-full py-4 rounded-full bg-gradient-to-r from-[#B76E79] to-[#814C53] text-white font-semibold text-center block soft-shadow hover:opacity-95 transition-all text-sm md:text-base cursor-pointer"
+        >
+          🎨 Ghép Khung Ảnh &amp; Gửi In Ngay
+        </a>
+
+        <!-- Nút Xem Thư Viện Ảnh Phiên Chụp nếu đã chụp -->
+        <a
+          *ngIf="ticket()?.status === 'COMPLETED' || ticket()?.status === 'ACTIVE'"
+          [routerLink]="['/portfolio']"
+          class="w-full py-3.5 rounded-full bg-white border border-[#B76E79]/30 text-[#814C53] font-semibold text-center block hover:bg-[#FAF6F0] transition-colors text-sm"
+        >
+          🖼️ Xem Ảnh Phiên Chụp
+        </a>
+      </div>
+
+    </div>
+
+  </div>
+</div>

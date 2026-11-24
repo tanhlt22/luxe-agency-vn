@@ -1,0 +1,17 @@
+.soft-shadow {
+  box-shadow: 0 10px 30px -5px rgba(183, 110, 121, 0.12), 0 4px 10px -2px rgba(0, 0, 0, 0.04);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #B76E79 #F3F4F6;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #B76E79;
+  border-radius: 9999px;
+}

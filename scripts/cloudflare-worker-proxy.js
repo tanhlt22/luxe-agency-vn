@@ -71,8 +71,9 @@ export default {
 
 async function proxyOpaqueMedia(request, url, route, env, ctx) {
   const cache = typeof caches !== 'undefined' && caches.default ? caches.default : null;
-  const cacheKey = new Request(url.toString(), { method: 'GET' });
-  const isThumbnail = url.searchParams.get('variant') === 'thumbnail';
+  const variant = (url.searchParams.get('variant') || '').toLowerCase();
+  const isThumbnail = variant === 'thumbnail';
+  const forceWebp = variant === 'webp' || url.searchParams.get('format') === 'webp';
 
   const secrets = getCandidateSecrets(env);
   if (secrets.length === 0) return withCors(json({ error: 'Media is temporarily unavailable' }, 503), request);
@@ -89,21 +90,48 @@ async function proxyOpaqueMedia(request, url, route, env, ctx) {
     return withCors(json({ error: 'Media not found' }, 404), request);
   }
 
-  const isPreviewImage = !route.download && (payload.kind === 'image' || isThumbnail);
-  const shouldEdgeCache = isPreviewImage && request.method === 'GET' && !request.headers.has('Range');
+  const isOriginalImage = !route.download && payload.kind === 'image' && variant === 'original';
+  const isPreviewImage = !route.download && !isOriginalImage && (payload.kind === 'image' || isThumbnail);
+  const isImageOriginalCacheable = payload.kind === 'image' && (isOriginalImage || route.download);
+  const shouldEdgeCache = (isPreviewImage || isImageOriginalCacheable) && request.method === 'GET' && !request.headers.has('Range');
+
+  const cacheKeyUrl = new URL(url.toString());
+  if (isImageOriginalCacheable) {
+    cacheKeyUrl.pathname = url.pathname.replace(/\/download$/, '');
+    cacheKeyUrl.search = '?variant=original';
+  }
+  const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
 
   if (cache && shouldEdgeCache) {
     const cachedResponse = await cache.match(cacheKey);
     if (cachedResponse && !isHtmlOrErrorResponse(cachedResponse)) {
-      return withCors(cachedResponse, request);
+      if (route.download) {
+        const dlHeaders = buildMediaResponseHeaders(cachedResponse.headers, payload, isThumbnail, route);
+        const isNullBodyStatus = cachedResponse.status === 204 || cachedResponse.status === 304;
+        return withCors(new Response(isNullBodyStatus ? null : cachedResponse.body, {
+          status: cachedResponse.status,
+          statusText: cachedResponse.statusText,
+          headers: dlHeaders
+        }), request, { publicRead: true, cacheStatus: 'HIT' });
+      }
+      return withCors(cachedResponse, request, { publicRead: true, cacheStatus: 'HIT' });
     }
   }
 
   const size = clampImageSize(url.searchParams.get('size'));
   let upstream = null;
+  let imageSource = payload.kind === 'video' ? 'video' : 'original';
 
   if (isPreviewImage) {
-    upstream = await fetchPreviewImage(request, payload, size, env);
+    const useWebp = isThumbnail || forceWebp;
+    upstream = await fetchPreviewImage(request, payload, size, env, { webp: useWebp });
+    if (upstream && !isHtmlOrErrorResponse(upstream)) {
+      imageSource = useWebp ? 'lh3-webp' : 'lh3-jpeg';
+    } else {
+      cancelBody(upstream);
+      upstream = await fetchDriveBinary(request, payload.fileId, payload.kind, env);
+      imageSource = 'original-fallback';
+    }
   } else {
     upstream = await fetchDriveBinary(request, payload.fileId, payload.kind, env);
   }
@@ -115,23 +143,77 @@ async function proxyOpaqueMedia(request, url, route, env, ctx) {
     return withCors(errorRes, request);
   }
 
+  const isNullBodyStatus = upstream.status === 204 || upstream.status === 304;
+  const inlineHeaders = buildMediaResponseHeaders(upstream.headers, payload, isThumbnail, { download: false });
+  inlineHeaders.set('X-Image-Source', imageSource);
+
+  if (route.download) {
+    const dlHeaders = buildMediaResponseHeaders(upstream.headers, payload, isThumbnail, route);
+    dlHeaders.set('X-Image-Source', imageSource);
+
+    if (cache && shouldEdgeCache && ctx && upstream.status === 200 && upstream.body) {
+      const [clientBody, cacheBody] = upstream.body.tee();
+      const cacheEntry = withCors(new Response(cacheBody, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: inlineHeaders
+      }), request, { publicRead: true });
+      ctx.waitUntil(
+        cache.put(cacheKey, cacheEntry).catch(err =>
+          console.warn('[media-proxy] cache.put failed:', err?.message || err)
+        )
+      );
+
+      return withCors(new Response(clientBody, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: dlHeaders
+      }), request, { publicRead: true, cacheStatus: 'MISS' });
+    }
+
+    return withCors(new Response(isNullBodyStatus ? null : upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: dlHeaders
+    }), request, { publicRead: true, cacheStatus: 'BYPASS' });
+  }
+
+  const response = withCors(new Response(isNullBodyStatus ? null : upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: inlineHeaders
+  }), request, { publicRead: true, cacheStatus: shouldEdgeCache ? 'MISS' : 'BYPASS' });
+
+  if (cache && shouldEdgeCache && ctx && upstream.status === 200) {
+    ctx.waitUntil(
+      cache.put(cacheKey, response.clone()).catch(err =>
+        console.warn('[media-proxy] cache.put failed:', err?.message || err)
+      )
+    );
+  }
+
+  return response;
+}
+
+function buildMediaResponseHeaders(sourceHeaders, payload, isThumbnail, route) {
   const headers = new Headers();
-  copyHeader(upstream.headers, headers, 'content-type');
-  copyHeader(upstream.headers, headers, 'content-length');
-  copyHeader(upstream.headers, headers, 'content-range');
-  copyHeader(upstream.headers, headers, 'accept-ranges');
-  copyHeader(upstream.headers, headers, 'etag');
-  copyHeader(upstream.headers, headers, 'last-modified');
+  copyHeader(sourceHeaders, headers, 'content-type');
+  copyHeader(sourceHeaders, headers, 'content-length');
+  copyHeader(sourceHeaders, headers, 'content-range');
+  copyHeader(sourceHeaders, headers, 'accept-ranges');
+  copyHeader(sourceHeaders, headers, 'etag');
+  copyHeader(sourceHeaders, headers, 'last-modified');
+  copyHeader(sourceHeaders, headers, 'x-image-source');
 
   if (payload.kind === 'video' && !isThumbnail) {
-    headers.set('Content-Type', payload.mimeType || upstream.headers.get('content-type') || 'video/mp4');
+    headers.set('Content-Type', payload.mimeType || sourceHeaders.get('content-type') || 'video/mp4');
     headers.set('Cache-Control', 'public, max-age=3600');
     headers.set('Accept-Ranges', 'bytes');
   } else {
     headers.set('Cache-Control', 'public, max-age=2592000, s-maxage=2592000');
   }
 
-  if (route.download) {
+  if (route?.download) {
     const fileName = safeFileName(payload.name, payload.kind);
     const asciiFileName = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
     headers.set('Content-Type', 'application/octet-stream');
@@ -139,21 +221,12 @@ async function proxyOpaqueMedia(request, url, route, env, ctx) {
     headers.set('Cache-Control', 'no-store');
   }
 
-  const response = withCors(new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers
-  }), request);
-
-  if (cache && shouldEdgeCache && ctx && upstream.status === 200) {
-    ctx.waitUntil(cache.put(cacheKey, response.clone()));
-  }
-
-  return response;
+  return headers;
 }
 
-async function fetchPreviewImage(request, payload, size, env) {
-  const lh3Url = `https://lh3.googleusercontent.com/d/${encodeURIComponent(payload.fileId)}=s${size}-rw`;
+async function fetchPreviewImage(request, payload, size, _env, options = {}) {
+  const suffix = options.webp ? '-rw' : '';
+  const lh3Url = `https://lh3.googleusercontent.com/d/${encodeURIComponent(payload.fileId)}=s${size}${suffix}`;
   try {
     const res = await fetch(lh3Url, {
       method: request.method,
@@ -165,12 +238,9 @@ async function fetchPreviewImage(request, payload, size, env) {
     }
     cancelBody(res);
   } catch (err) {
-    console.warn('[media-proxy] lh3 preview failed, falling back to Drive API:', err?.message || err);
+    console.warn('[media-proxy] lh3 preview failed, falling back to Drive binary:', err?.message || err);
   }
 
-  if (payload.kind === 'image' && hasGoogleOAuth(env)) {
-    return fetchDriveApiMedia(request, payload.fileId, env);
-  }
   return null;
 }
 
@@ -354,7 +424,8 @@ async function proxyOpaqueUpload(request, route, env) {
     copyHeader(upstream.headers, headers, name);
   }
   headers.set('Cache-Control', 'no-store');
-  return withCors(new Response(upstream.body, {
+  const isNullBodyStatus = upstream.status === 204 || upstream.status === 304;
+  return withCors(new Response(isNullBodyStatus ? null : upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers
@@ -377,7 +448,8 @@ async function proxyLegacyMedia(request, url, env, ctx) {
       headers.delete('location');
       headers.delete('set-cookie');
       headers.set('Cache-Control', 'no-store');
-      return withCors(new Response(upstream.body, {
+      const isNullBodyStatus = upstream.status === 204 || upstream.status === 304;
+      return withCors(new Response(isNullBodyStatus ? null : upstream.body, {
         status: upstream.status,
         statusText: upstream.statusText,
         headers
@@ -415,7 +487,8 @@ async function proxyLegacyMedia(request, url, env, ctx) {
     headers.set('Cache-Control', isFileProxy
       ? 'no-store'
       : 'public, max-age=2592000, s-maxage=2592000');
-    response = new Response(upstream.body, {
+    const isNullBodyStatus = upstream.status === 204 || upstream.status === 304;
+    response = new Response(isNullBodyStatus ? null : upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers
@@ -426,7 +499,7 @@ async function proxyLegacyMedia(request, url, env, ctx) {
     }
   }
 
-  return withCors(response, request);
+  return withCors(response, request, { publicRead: true });
 }
 
 function getMediaRoute(url) {
@@ -521,20 +594,36 @@ function isAllowedOrigin(origin) {
   }
 }
 
-function withCors(response, request) {
-  const origin = request.headers.get('Origin');
-  if (origin && isAllowedOrigin(origin)) {
-    response.headers.set('Access-Control-Allow-Origin', origin);
-    response.headers.set('Vary', 'Origin');
+function withCors(response, request, options = {}) {
+  const headers = new Headers(response.headers);
+  if (options.publicRead) {
+    // Public tokenized media reads use wildcard CORS without Vary: Origin so Cloudflare edge cache is never fragmented per origin.
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.delete('Vary');
   } else {
-    response.headers.set('Access-Control-Allow-Origin', '*');
+    const origin = request.headers.get('Origin');
+    if (origin && isAllowedOrigin(origin)) {
+      headers.set('Access-Control-Allow-Origin', origin);
+      headers.set('Vary', 'Origin');
+    } else {
+      headers.set('Access-Control-Allow-Origin', '*');
+    }
   }
-  response.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, PUT, OPTIONS');
-  response.headers.set('Access-Control-Allow-Headers', 'Range, If-Range, If-None-Match, If-Modified-Since, Content-Type, Content-Range, X-Upload-Content-Type, X-Upload-Content-Length');
-  response.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-  response.headers.set('Referrer-Policy', 'no-referrer');
-  response.headers.set('X-Content-Type-Options', 'nosniff');
-  return response;
+  if (options.cacheStatus) {
+    headers.set('X-Media-Cache', options.cacheStatus);
+  }
+  headers.set('Access-Control-Allow-Methods', 'GET, HEAD, PUT, OPTIONS');
+  headers.set('Access-Control-Allow-Headers', 'Range, If-Range, If-None-Match, If-Modified-Since, Content-Type, Content-Range, X-Upload-Content-Type, X-Upload-Content-Length');
+  headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  headers.set('Referrer-Policy', 'no-referrer');
+  headers.set('X-Content-Type-Options', 'nosniff');
+
+  const isNullBodyStatus = response.status === 204 || response.status === 304;
+  return new Response(isNullBodyStatus ? null : response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
 
 function json(body, status) {
@@ -560,9 +649,9 @@ function isSafeUploadTarget(value) {
 }
 
 function clampImageSize(value) {
-  const size = Number.parseInt(value || '1080', 10);
-  if (!Number.isFinite(size)) return 1080;
-  return Math.min(Math.max(size, 200), 2560);
+  const size = Number.parseInt(value || '1600', 10);
+  if (!Number.isFinite(size)) return 1600;
+  return Math.min(Math.max(size, 200), 4096);
 }
 
 function safeFileName(value, kind) {

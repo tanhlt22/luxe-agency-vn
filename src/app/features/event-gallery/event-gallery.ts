@@ -1,6 +1,7 @@
-import { Component, OnInit, OnDestroy, signal, computed, effect, ChangeDetectionStrategy, WritableSignal } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, ViewChild, signal, computed, effect, ChangeDetectionStrategy, WritableSignal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { GoogleDriveGalleryService, GalleryPhoto, GallerySession } from './services/google-drive-gallery.service';
 
 /** Wrapper cho windowing - giữ index gốc để opacity toggle đúng */
@@ -31,6 +32,7 @@ export class EventGallery implements OnInit, OnDestroy {
   activeSession = signal<GallerySession | null>(null);
   activeSessionMediaIndex = signal<number>(0);
   isSingleSession = signal<boolean>(false);
+  ticketCode = signal<string>('');
   isSessionTimedOut = signal<boolean>(false);
   selectedIndex = signal<number>(0);
   isLoading = signal<boolean>(true);
@@ -51,19 +53,48 @@ export class EventGallery implements OnInit, OnDestroy {
   isDownloading = signal<boolean>(false);
   isRefreshing = signal<boolean>(false);
 
+  // ===== LAZY LOADING & INFINITE SCROLL (EVENT FLOW) =====
+  private readonly LAZY_BATCH_SIZE = 16;
+  visibleCount = signal<number>(16);
+  nextCursor = signal<string | null>(null);
+  isLoadingMore = signal<boolean>(false);
+  private sentinelObserver: IntersectionObserver | null = null;
+  private sentinelElement: HTMLElement | null = null;
+
+  @ViewChild('lazySentinel')
+  set lazySentinelRef(ref: ElementRef<HTMLElement> | undefined) {
+    const el = ref?.nativeElement ?? null;
+    if (this.sentinelElement === el) return;
+    if (this.sentinelObserver && this.sentinelElement) {
+      this.sentinelObserver.unobserve(this.sentinelElement);
+    }
+    this.sentinelElement = el;
+    if (el) {
+      this.ensureSentinelObserver();
+      this.sentinelObserver?.observe(el);
+    }
+  }
+
   // ===== COMPUTED =====
   selectedPhoto = computed(() => this.photos()[this.selectedIndex()]);
   isStripSelected = computed(() => {
     const p = this.selectedPhoto();
     return !!p && (p.role === 'final' || (p.name ? p.name.toLowerCase().includes('print') : false));
   });
+  visibleEventPhotos = computed<GalleryPhoto[]>(() => {
+    return this.photos().slice(0, this.visibleCount());
+  });
+  visiblePhotoCount = computed<number>(() => this.visibleEventPhotos().length);
+  hasMorePhotos = computed<boolean>(() => {
+    return !this.isSingleSession() && (this.visibleCount() < this.photos().length || Boolean(this.nextCursor()));
+  });
   leftColumnPhotos = computed<MasonryPhotoItem[]>(() => {
-    return this.photos()
+    return this.visibleEventPhotos()
       .map((photo, index) => ({ photo, index }))
       .filter((_, i) => i % 2 === 0);
   });
   rightColumnPhotos = computed<MasonryPhotoItem[]>(() => {
-    return this.photos()
+    return this.visibleEventPhotos()
       .map((photo, index) => ({ photo, index }))
       .filter((_, i) => i % 2 === 1);
   });
@@ -152,13 +183,22 @@ export class EventGallery implements OnInit, OnDestroy {
   private preparedShareMediaId: string | null = null;
   private sharePrepareAbort: AbortController | null = null;
 
-  // Demo mode
-  private demoPhotos: GalleryPhoto[] = [
-    { mediaId: 'demo1', name: 'Khoảnh khắc hạnh phúc', kind: 'image', thumbnailUrl: 'photos/photo1.png', mediaUrl: 'photos/photo1.png', lightboxUrl: 'photos/photo1.png', downloadUrl: 'photos/photo1.png', createdTime: new Date().toISOString() },
-    { mediaId: 'demo2', name: 'Lễ cắt bánh', kind: 'image', thumbnailUrl: 'photos/photo2.png', mediaUrl: 'photos/photo2.png', lightboxUrl: 'photos/photo2.png', downloadUrl: 'photos/photo2.png', createdTime: new Date().toISOString() },
-    { mediaId: 'demo3', name: 'Trao nhẫn cưới', kind: 'image', thumbnailUrl: 'photos/photo3.png', mediaUrl: 'photos/photo3.png', lightboxUrl: 'photos/photo3.png', downloadUrl: 'photos/photo3.png', createdTime: new Date().toISOString() },
-    { mediaId: 'demo4', name: 'Chân dung cặp đôi', kind: 'image', thumbnailUrl: 'photos/photo4.png', mediaUrl: 'photos/photo4.png', lightboxUrl: 'photos/photo4.png', downloadUrl: 'photos/photo4.png', createdTime: new Date().toISOString() },
-  ];
+  // Demo mode (28 items to test progressive lazy loading in Event Flow)
+  private demoPhotos: GalleryPhoto[] = Array.from({ length: 28 }, (_, i) => {
+    const sampleIdx = (i % 4) + 1;
+    const sampleUrl = `photos/photo${sampleIdx}.png`;
+    const titles = ['Khoảnh khắc hạnh phúc', 'Lễ cắt bánh', 'Trao nhẫn cưới', 'Chân dung cặp đôi'];
+    return {
+      mediaId: `demo${i + 1}`,
+      name: `${titles[i % 4]} #${i + 1}`,
+      kind: 'image' as const,
+      thumbnailUrl: sampleUrl,
+      mediaUrl: sampleUrl,
+      lightboxUrl: sampleUrl,
+      downloadUrl: sampleUrl,
+      createdTime: new Date(Date.now() - i * 60000).toISOString()
+    };
+  });
 
   private demoSessions: GallerySession[] = [
     {
@@ -197,10 +237,16 @@ export class EventGallery implements OnInit, OnDestroy {
 
   constructor(
     private route: ActivatedRoute,
+    private router: Router,
     private driveService: GoogleDriveGalleryService
   ) {
-    // PREDICTIVE PRELOADING: chỉ preload ảnh current ± 1 (3 ảnh thay vì tất cả)
+    // PREDICTIVE PRELOADING: chỉ chạy cho luồng xem từng phiên (Slideshow), không tải sớm ở Event Flow
     effect(() => {
+      if (!this.isSingleSession()) {
+        this.prepareShareFile(undefined);
+        return;
+      }
+
       const idx = this.selectedIndex();
       const all = this.photos();
       if (all.length === 0) {
@@ -215,7 +261,7 @@ export class EventGallery implements OnInit, OnDestroy {
         (idx + 1) % total
       ];
       for (const i of targets) {
-        this.preloadSingle(all[i], this.isSingleSession() ? 2560 : 1080);
+        this.preloadSingle(all[i], 2560);
       }
 
       this.prepareShareFile(all[idx]);
@@ -229,6 +275,7 @@ export class EventGallery implements OnInit, OnDestroy {
       this.route.queryParamMap.subscribe(queryParams => {
         const legacyQueryValue = queryParams.get('m');
         const sessionPublicId = queryParams.get('s');
+        this.ticketCode.set((queryParams.get('ticket') || queryParams.get('code') || '').trim());
         this.isSessionGallery = Boolean(sessionPublicId);
         this.isSingleSession.set(Boolean(sessionPublicId));
         this.driveService.setRouteQuery(legacyQueryValue, sessionPublicId);
@@ -239,6 +286,7 @@ export class EventGallery implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.stopPolling();
+    this.disconnectSentinelObserver();
     document.removeEventListener('visibilitychange', this.visibilityHandler);
     this.lruCache.clear();
     this.sharePrepareAbort?.abort();
@@ -247,47 +295,91 @@ export class EventGallery implements OnInit, OnDestroy {
     this.preparedShareMediaId = null;
   }
 
-  // ========== DATA LOADING ==========
+  openSelfBoothComposer() {
+    const currentPhotos = this.photos()
+      .filter(p => !this.isVideo(p))
+      .map((p, idx) => ({
+        id: p.mediaId || `ses_${idx}`,
+        url: this.getSessionPhotoSrc(p),
+        name: p.name || `Ảnh #${idx + 1}`,
+        source: 'session' as const
+      }));
+    try {
+      sessionStorage.setItem('sb_session_photos', JSON.stringify(currentPhotos));
+    } catch {
+      // Ignore storage quota restrictions on private mobile tabs
+    }
+    const s = this.route.snapshot.queryParamMap.get('s') || this.eventId || '';
+    const ticket = this.ticketCode() || '';
+    this.router.navigate(['/selfbooth/compose'], {
+      queryParams: {
+        ...(s ? { session: s } : {}),
+        ...(ticket ? { ticket } : {})
+      }
+    });
+  }
+
+  // ========== DATA LOADING & LAZY PAGINATION ==========
 
   private loadInitialPhotos() {
     this.isLoading.set(true);
     this.errorMessage.set(null);
     this.knownMediaIds.clear();
     this.isSessionTimedOut.set(false);
+    this.nextCursor.set(null);
+    this.isLoadingMore.set(false);
+    this.visibleCount.set(this.LAZY_BATCH_SIZE);
 
     if (this.eventId && this.eventId.startsWith('demo')) {
       setTimeout(() => {
         this.photos.set(this.demoPhotos);
         this.sessions.set(this.demoSessions);
         this.demoPhotos.forEach(p => this.knownMediaIds.add(p.mediaId));
+        this.galleryStatus.set('READY');
         this.isLoading.set(false);
-      }, 800);
+      }, 450);
       return;
     }
 
     if (!this.eventId) return;
 
-    this.loadGalleryPage(null, []);
+    this.loadGalleryPage(null, false);
   }
 
-  private loadGalleryPage(cursor: string | null, accumulated: GalleryPhoto[]) {
+  private loadGalleryPage(cursor: string | null, append: boolean) {
     if (!this.eventId) return;
+    if (append) {
+      if (this.isLoadingMore()) return;
+      this.isLoadingMore.set(true);
+    }
+
     this.driveService.listPhotosInFolder(this.eventId, cursor).subscribe({
       next: (result) => {
-        const byId = new Map(accumulated.map(photo => [photo.mediaId, photo]));
+        const mergedSessions = append
+          ? this.mergeSessions(this.sessions(), result.sessions || [])
+          : (result.sessions || []);
+        if (mergedSessions.length > 0 || !append) {
+          this.sessions.set(mergedSessions);
+        }
+
+        const existingPhotos = append ? this.photos() : [];
+        const byId = new Map(existingPhotos.map(photo => [photo.mediaId, photo]));
         result.photos.forEach(photo => byId.set(photo.mediaId, photo));
-        const photos = Array.from(byId.values());
-        if (!this.isSessionGallery && result.status === 'READY' && result.nextCursor) {
-          this.loadGalleryPage(result.nextCursor, photos);
-          return;
-        }
-        if (result.sessions && result.sessions.length > 0) {
-          this.sessions.set(result.sessions);
-        }
+        const mergedPhotos = this.sortPhotos(Array.from(byId.values()));
+
         this.galleryStatus.set(result.status);
-        this.photos.set(this.sortPhotos(photos));
-        photos.forEach(p => this.knownMediaIds.add(p.mediaId));
-        this.isLoading.set(false);
+        this.photos.set(mergedPhotos);
+        mergedPhotos.forEach(p => this.knownMediaIds.add(p.mediaId));
+        this.nextCursor.set(!this.isSessionGallery ? (result.nextCursor || null) : null);
+
+        if (append) {
+          this.visibleCount.update(c => Math.min(c + this.LAZY_BATCH_SIZE, mergedPhotos.length));
+          this.isLoadingMore.set(false);
+        } else {
+          this.visibleCount.set(Math.min(this.LAZY_BATCH_SIZE, mergedPhotos.length || this.LAZY_BATCH_SIZE));
+          this.isLoading.set(false);
+        }
+
         if (this.isSessionGallery) {
           // Luồng phiên chụp: Luôn bật polling tự động để đón các ảnh chụp (shots) và video hậu trường (bts) đang tải lên
           this.pollIntervalMs = this.SESSION_POLL_INTERVAL_MS;
@@ -301,10 +393,107 @@ export class EventGallery implements OnInit, OnDestroy {
       },
       error: (err) => {
         console.error('Failed to load photos:', err);
-        this.errorMessage.set(this.describeGalleryError(err));
-        this.isLoading.set(false);
+        if (append) {
+          this.isLoadingMore.set(false);
+        } else {
+          this.errorMessage.set(this.describeGalleryError(err));
+          this.isLoading.set(false);
+        }
       }
     });
+  }
+
+  /**
+   * Lazy-load đợt ảnh tiếp theo khi người dùng cuộn gần cuối thư viện:
+   * 1. Hiện thêm batch từ danh sách đã nạp sẵn trong RAM (không tốn mạng).
+   * 2. Nếu gần hết ảnh đã đệm và server còn trang tiếp (`nextCursor`), tự động gọi trang tiếp theo.
+   */
+  loadMorePhotos(): void {
+    if (this.isSingleSession()) return;
+
+    const totalLoaded = this.photos().length;
+    const currentVisible = this.visibleCount();
+
+    if (currentVisible < totalLoaded) {
+      this.visibleCount.set(Math.min(currentVisible + this.LAZY_BATCH_SIZE, totalLoaded));
+    }
+
+    const remainingBuffered = totalLoaded - this.visibleCount();
+    const cursor = this.nextCursor();
+    if (cursor && remainingBuffered < this.LAZY_BATCH_SIZE && !this.isLoadingMore()) {
+      this.loadGalleryPage(cursor, true);
+    }
+  }
+
+  private ensureSentinelObserver(): void {
+    if (this.sentinelObserver || typeof IntersectionObserver === 'undefined') return;
+    this.sentinelObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries.some(entry => entry.isIntersecting)) {
+          this.loadMorePhotos();
+        }
+      },
+      { rootMargin: '450px 0px', threshold: 0.01 }
+    );
+  }
+
+  private disconnectSentinelObserver(): void {
+    if (this.sentinelObserver) {
+      this.sentinelObserver.disconnect();
+      this.sentinelObserver = null;
+    }
+    this.sentinelElement = null;
+  }
+
+  private mergeSessions(existing: GallerySession[], incoming: GallerySession[]): GallerySession[] {
+    if (existing.length === 0) return incoming;
+    if (incoming.length === 0) return existing;
+
+    const map = new Map<string, GallerySession>();
+    for (const s of existing) {
+      if (s.sessionId) map.set(s.sessionId, { ...s, shots: [...s.shots], allMedia: [...s.allMedia] });
+    }
+    for (const s of incoming) {
+      if (!s.sessionId) continue;
+      const prev = map.get(s.sessionId);
+      if (!prev) {
+        map.set(s.sessionId, s);
+        continue;
+      }
+      const shotsById = new Map(prev.shots.map(sh => [sh.mediaId, sh]));
+      s.shots.forEach(sh => shotsById.set(sh.mediaId, sh));
+      const shots = Array.from(shotsById.values()).sort((a, b) => (a.slotIndex || 0) - (b.slotIndex || 0));
+      const finalPhoto = prev.finalPhoto || s.finalPhoto;
+      const btsVideo = prev.btsVideo || s.btsVideo;
+      const allMedia = [finalPhoto, ...shots, btsVideo].filter(Boolean) as GalleryPhoto[];
+      if (finalPhoto && finalPhoto.sessionInfo) {
+        finalPhoto.sessionInfo = {
+          ...finalPhoto.sessionInfo,
+          shotCount: shots.length,
+          hasBts: Boolean(btsVideo),
+          totalMediaCount: allMedia.length
+        };
+      }
+      map.set(s.sessionId, {
+        ...prev,
+        timestamp: Math.max(prev.timestamp || 0, s.timestamp || 0),
+        finalPhoto,
+        shots,
+        btsVideo,
+        allMedia,
+        mediaCount: allMedia.length
+      });
+    }
+
+    return Array.from(map.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }
+
+  trackByMasonryItem(_index: number, item: MasonryPhotoItem): string {
+    return item.photo.mediaId;
+  }
+
+  trackByPhoto(_index: number, photo: GalleryPhoto): string {
+    return photo.mediaId;
   }
 
   // ========== POLLING (Exponential Backoff) ==========
@@ -760,15 +949,35 @@ export class EventGallery implements OnInit, OnDestroy {
 
   async downloadAllPhotos() {
     if (this.isZippingAll()) return;
-    const photos = this.photos();
-    if (photos.length === 0) return;
+    if (this.photos().length === 0) return;
 
     this.isZippingAll.set(true);
     this.zipAllProgress.set('0%');
 
     try {
+      // Nếu còn trang chưa tải từ server, tự động nạp nốt để file ZIP luôn đủ toàn bộ sự kiện
+      let cursor = this.nextCursor();
+      let safetyPages = 0;
+      while (cursor && this.eventId && !this.eventId.startsWith('demo') && safetyPages < 15) {
+        safetyPages++;
+        this.zipAllProgress.set(`Đang nạp danh sách (${this.photos().length}+)...`);
+        const page = await firstValueFrom(this.driveService.listPhotosInFolder(this.eventId, cursor));
+        if (page.sessions && page.sessions.length > 0) {
+          this.sessions.set(this.mergeSessions(this.sessions(), page.sessions));
+        }
+        const byId = new Map(this.photos().map(p => [p.mediaId, p]));
+        page.photos.forEach(p => {
+          byId.set(p.mediaId, p);
+          this.knownMediaIds.add(p.mediaId);
+        });
+        const merged = this.sortPhotos(Array.from(byId.values()));
+        this.photos.set(merged);
+        cursor = page.nextCursor || null;
+        this.nextCursor.set(cursor);
+      }
+
       const eventName = this.eventId || 'su_kien';
-      await this.downloadZip(photos, `Su_kien_${eventName}.zip`, this.zipAllProgress);
+      await this.downloadZip(this.photos(), `Su_kien_${eventName}.zip`, this.zipAllProgress);
     } finally {
       this.isZippingAll.set(false);
       this.zipAllProgress.set('');
@@ -887,7 +1096,7 @@ export class EventGallery implements OnInit, OnDestroy {
     this.preparedShareFile = null;
     this.preparedShareMediaId = null;
 
-    if (!photo || !this.isIOSDevice()) return;
+    if (!photo || this.isVideo(photo) || !this.isIOSDevice()) return;
 
     const url = this.driveService.getDownloadUrl(photo);
     if (!url) return;
@@ -1419,16 +1628,33 @@ export class EventGallery implements OnInit, OnDestroy {
     return this.driveService.isVideo(photo);
   }
 
-  /** Main photo: s1080 (không -rw, chất lượng cao) */
+  /** Main photo: 1600px JPEG (không -rw, chất lượng cao) */
   getPhotoSrc(photo: GalleryPhoto): string {
     if (!photo) return '';
     if (photo.mediaId.startsWith('demo')) return photo.mediaUrl;
-    return this.driveService.getHighResUrl(photo, 1080);
+    return this.driveService.getHighResUrl(photo, 1600);
   }
 
   getVideoSrc(photo: GalleryPhoto): string {
     if (!photo) return '';
     return this.driveService.getVideoUrl(photo);
+  }
+
+  /** Responsive srcset cho lưới 2 cột (nhẹ băng thông mobile, vẫn sắc nét Retina) */
+  getMasonrySrcset(photo: GalleryPhoto): string {
+    if (!photo || this.isVideo(photo) || photo.mediaId.startsWith('demo') || photo._thumbError || photo._mainError) return '';
+    const s480 = this.driveService.getHighResUrl(photo, 480);
+    const s800 = this.driveService.getHighResUrl(photo, 800);
+    const s1200 = this.driveService.getHighResUrl(photo, 1200);
+    return `${s480} 480w, ${s800} 800w, ${s1200} 1200w`;
+  }
+
+  /** Responsive srcset cho Feed 1 cột */
+  getFeedSrcset(photo: GalleryPhoto): string {
+    if (!photo || this.isVideo(photo) || photo.mediaId.startsWith('demo') || photo._thumbError || photo._mainError) return '';
+    const s800 = this.driveService.getHighResUrl(photo, 800);
+    const s1440 = this.driveService.getHighResUrl(photo, 1440);
+    return `${s800} 800w, ${s1440} 1440w`;
   }
 
   /** Retina srcset: Cung cấp nhiều mốc kích thước để trình duyệt tự chọn */
@@ -1454,7 +1680,7 @@ export class EventGallery implements OnInit, OnDestroy {
     }
   }
 
-  /** Lightbox: 2560px cho zoom */
+  /** Lightbox: Bản gốc trực tiếp từ Cloudflare Edge Cache */
   getLightboxSrc(photo: GalleryPhoto): string {
     if (!photo) return '';
     if (photo.mediaId.startsWith('demo')) return photo.mediaUrl;
@@ -1468,17 +1694,27 @@ export class EventGallery implements OnInit, OnDestroy {
     return src.includes('#') ? src : `${src}#t=0.001`;
   }
 
-  /** Ảnh chất lượng cao nhất cho luồng xem theo phiên (2560px / Gốc HD) */
+  /** Ảnh chất lượng gốc cho luồng xem theo phiên (Cloudflare Edge Cache) */
   getSessionPhotoSrc(photo: GalleryPhoto | null | undefined): string {
     if (!photo) return '';
     if (this.isVideo(photo)) return this.VIDEO_FALLBACK_SVG;
+    if (photo._mainError) return this.driveService.getDownloadUrl(photo);
     return this.getLightboxSrc(photo);
   }
 
-  /** Grid preview: 2560px ảnh gốc sắc nét, video fallback SVG nếu render thẻ img */
+  /** Feed 1 cột: dùng 2560px JPEG (bỏ -rw) nhẹ hơn khi cuộn; chạm mở Lightbox mới tải bản gốc */
+  getFeedSrc(photo: GalleryPhoto): string {
+    if (!photo) return '';
+    if (this.isVideo(photo)) return this.VIDEO_FALLBACK_SVG;
+    if (photo._thumbError || photo._mainError) return this.driveService.getDownloadUrl(photo);
+    return photo.mediaUrl || this.getLightboxSrc(photo);
+  }
+
+  /** Grid preview: 1600px JPEG sắc nét cho lưới 2 cột, bản gốc cho phiên đơn */
   getPreviewSrc(photo: GalleryPhoto): string {
     if (!photo) return '';
     if (this.isVideo(photo)) return this.VIDEO_FALLBACK_SVG;
+    if (photo._thumbError || photo._mainError) return this.driveService.getDownloadUrl(photo);
     if (this.isSingleSession()) return this.getLightboxSrc(photo);
     return photo.thumbnailUrl || this.getLightboxSrc(photo);
   }
@@ -1489,12 +1725,12 @@ export class EventGallery implements OnInit, OnDestroy {
     return this.VIDEO_FALLBACK_SVG;
   }
 
-  /** Thumbnail: s200-rw (nhẹ, WebP) cho ảnh, SVG cho video */
+  /** Thumbnail filmstrip: 1600px JPEG cho ảnh, SVG cho video */
   getThumbSrc(photo: GalleryPhoto): string {
     if (!photo) return '';
     if (this.isVideo(photo)) return this.VIDEO_FALLBACK_SVG;
     if (photo.mediaId.startsWith('demo')) return photo.thumbnailUrl;
-    if (photo._thumbError) return this.driveService.getHighResUrl(photo, 400);
+    if (photo._thumbError) return this.driveService.getDownloadUrl(photo);
     return this.driveService.getThumbnailUrl(photo);
   }
 
@@ -1528,7 +1764,7 @@ export class EventGallery implements OnInit, OnDestroy {
     if (!photo || this.isVideo(photo)) return;
     const url = (this.isSingleSession() || size >= 2160)
       ? this.getLightboxSrc(photo)
-      : (size <= 1080 ? this.getPhotoSrc(photo) : this.driveService.getHighResUrl(photo, size));
+      : (size <= 1600 ? (photo.thumbnailUrl || this.getPhotoSrc(photo)) : this.driveService.getHighResUrl(photo, size));
     if (!url) return;
 
     // LRU touch: di chuyển về cuối Map nếu đã có

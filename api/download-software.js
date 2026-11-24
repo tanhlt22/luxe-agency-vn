@@ -1,11 +1,23 @@
 const SOFTWARE_DOWNLOAD_URL = process.env.SOFTWARE_DOWNLOAD_URL || 'https://tanhbooth-api.laihoanganh456.workers.dev/download/latest';
 
+const EDITION_PRODUCTS = { event: 'pica-event', booth: 'pica-booth' };
+
+// ?edition=event|booth downloads that edition's installer; no edition keeps the default link.
+function resolveDefaultDownloadUrl(req) {
+  const edition = typeof req.query?.edition === 'string' ? req.query.edition.trim().toLowerCase() : '';
+  const product = EDITION_PRODUCTS[edition];
+  if (!product) return SOFTWARE_DOWNLOAD_URL;
+  const url = new URL(SOFTWARE_DOWNLOAD_URL);
+  url.searchParams.set('product', product);
+  return url.toString();
+}
+
 export default async function handler(req, res) {
   const requestedFileId = typeof req.query?.id === 'string' ? req.query.id.trim() : '';
 
   if (!requestedFileId) {
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Location', SOFTWARE_DOWNLOAD_URL);
+    res.setHeader('Location', resolveDefaultDownloadUrl(req));
     res.status(302).end();
     return;
   }
@@ -38,7 +50,7 @@ export default async function handler(req, res) {
     res.status(302).end();
   } catch (error) {
     console.error('[download-software] resolver error:', error);
-    res.setHeader('Location', SOFTWARE_DOWNLOAD_URL);
+    res.setHeader('Location', resolveDefaultDownloadUrl(req));
     res.status(302).end();
   }
 }
